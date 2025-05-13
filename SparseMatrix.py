@@ -51,35 +51,35 @@ class SparseDataFrame:
         if tar_file:
             self.load(tar_file)
         else:
-            self.__data = data
-            self.__columns = columns
-            self.__indices = indices
+            self._data = data
+            self._columns = columns
+            self._indices = indices
             self.update_dims()
         self.HIDDEN_PATH = Path(f".temp_sparse_files_/")
 
     def update_dims(self):
-        self.n_cols = self.__data.shape[1]
-        if self.__columns:
-            ncols = len(self.__columns)
+        self.n_cols = self._data.shape[1]
+        if self._columns:
+            ncols = len(self._columns)
             assert (
-                len(set(self.__columns)) == ncols
+                len(set(self._columns)) == ncols
             ), "Error, columns names must be unique!"
             assert (
                 self.n_cols == ncols
             ), "Error, number of columns must match first dimensionality of the data!"
 
-        self.n_inds = self.__data.shape[0]
-        if self.__indices:
-            nrows = len(self.__indices)
+        self.n_inds = self._data.shape[0]
+        if self._indices:
+            nrows = len(self._indices)
             assert (
-                len(set(self.__indices)) == nrows
+                len(set(self._indices)) == nrows
             ), "Error, indices names must be unique!"
             assert (
                 self.n_inds == nrows
             ), "Error, number of indices must match first dimensionality of the data!"
 
     def shape(self):
-        return self.__data.shape
+        return self._data.shape
 
     def nrows(self):
         return self.n_inds
@@ -88,13 +88,17 @@ class SparseDataFrame:
         return self.n_cols
 
     def get_data(self, copy: bool = True):
-        return self.__data.copy() if copy else self.__data
+        if copy:
+            return self._data.copy() 
+        else:
+            logging.info("Warning, copy set to False. Changes to data can be permanent.")
+            return self._data
 
     def indices(self):
-        return self.__indices
+        return self._indices
 
     def columns(self):
-        return self.__columns
+        return self._columns
 
     def set_columns(self, columns: ArrayLike):
         assert isinstance(columns, (ndarray, set, list)), "Column type not recognized!"
@@ -102,11 +106,11 @@ class SparseDataFrame:
             columns
         ), "Error, number of columns must match zeroith dimensionality of the data!"
         if isinstance(columns, ndarray):
-            self.__columns = columns.tolist()
+            self._columns = columns.tolist()
         if isinstance(columns, set):
-            self.__columns = list(columns)
+            self._columns = list(columns)
         if isinstance(columns, list):
-            self.__columns = columns
+            self._columns = columns
         self.update_dims()
 
     def set_indices(self, indices: ArrayLike):
@@ -115,28 +119,28 @@ class SparseDataFrame:
             indices
         ), "Error, number of indices must match first dimensionality of the data!"
         if isinstance(indices, ndarray):
-            self.__indices = indices.tolist()
+            self._indices = indices.tolist()
         if isinstance(indices, set):
-            self.__indices = list(indices)
+            self._indices = list(indices)
         if isinstance(indices, list):
-            self.__indices = indices
+            self._indices = indices
         self.update_dims()
 
     def __rm_icols(self, mask: list):
         mask = [x for x in range(self.n_cols) if x not in mask]
-        self.__data = self.__data[mask, :]
-        self.__columns = [x for i, x in enumerate(self.__columns) if i in mask]
+        self._data = self._data[mask, :]
+        self._columns = [x for i, x in enumerate(self._columns) if i in mask]
         self.update_dims()
 
     def __rm_irows(self, mask: list):
         mask = [x for x in range(self.n_rows) if x not in mask]
-        self.__data = self.__data[:, mask]
-        self.__indices = [x for i, x in enumerate(self.__indices) if i in mask]
+        self._data = self._data[:, mask]
+        self._indices = [x for i, x in enumerate(self._indices) if i in mask]
         self.update_dims()
 
     def rm_cols(self, columns: ArrayLike):
-        assert self.__columns, "Columns not set!"
-        mask = [self.__columns.index(x) for x in columns]
+        assert self._columns, "Columns not set!"
+        mask = [self._columns.index(x) for x in columns]
         self.__rm_icols(mask)
 
     def rm_icols(self, columns: ArrayLike):
@@ -144,8 +148,8 @@ class SparseDataFrame:
         self.__rm_icols(columns)
 
     def rm_rows(self, indices: ArrayLike):
-        assert self.__indices, "Indices not set!"
-        mask = [self.__indices.index(x) for x in indices]
+        assert self._indices, "Indices not set!"
+        mask = [self._indices.index(x) for x in indices]
         self.__rm_irows(mask)
 
     def rm_irows(self, columns: ArrayLike):
@@ -157,9 +161,9 @@ class SparseDataFrame:
             assert data.shape[1] == len(
                 column_names
             ), "Data and columns are added at different lengths!"
-            assert self.__columns, "Column names must exist before adding!"
-            self.__columns.extend(column_names)
-        self.__data = hstack([self.__data, data])
+            assert self._columns, "Column names must exist before adding!"
+            self._columns.extend(column_names)
+        self._data = hstack([self._data, data])
         self.update_dims()
 
     def append_inds(self, data: csr_matrix, index_names: list = None):
@@ -167,41 +171,41 @@ class SparseDataFrame:
             assert data.shape[0] == len(
                 index_names
             ), "Data and indices are added at different lengths!"
-            assert self.__indices, "Index names must exist before adding!"
-            self.__indices.extend(index_names)
-        self.__data = vstack([self.__data, data])
+            assert self._indices, "Index names must exist before adding!"
+            self._indices.extend(index_names)
+        self._data = vstack([self._data, data])
         self.update_dims()
 
     def head(self, n: int = 5):
         """Return the n upper left corner of the matrix"""
         return DataFrame(
-            data=self.__data[:n, :n].todense(),
-            index=self.__indices[:n] if self.__indices else None,
-            columns=self.__columns[:n] if self.__columns else None,
+            data=self._data[:n, :n].todense(),
+            index=self._indices[:n] if self._indices else None,
+            columns=self._columns[:n] if self._columns else None,
         )
 
     def head_right(self, n: int = 5):
         """Return the n upper right corner of the matrix"""
         return DataFrame(
-            data=self.__data[-n:, :n].todense(),
-            index=self.__indices[:n] if self.__indices else None,
-            columns=self.__columns[-n:] if self.__columns else None,
+            data=self._data[-n:, :n].todense(),
+            index=self._indices[:n] if self._indices else None,
+            columns=self._columns[-n:] if self._columns else None,
         )
 
     def tail(self, n: int = 5):
         """Return the n bottom left corner of the matrix"""
         return DataFrame(
-            data=self.__data[:n, -n:].todense(),
-            index=self.__indices[-n:] if self.__indices else None,
-            columns=self.__columns[:n] if self.__columns else None,
+            data=self._data[:n, -n:].todense(),
+            index=self._indices[-n:] if self._indices else None,
+            columns=self._columns[:n] if self._columns else None,
         )
 
     def tail_right(self, n: int = 5):
         """Return the n bottom right corner of the matrix"""
         return DataFrame(
-            data=self.__data[-n:, -n:].todense(),
-            index=self.__indices[-n:] if self.__indices else None,
-            columns=self.__columns[-n:] if self.__columns else None,
+            data=self._data[-n:, -n:].todense(),
+            index=self._indices[-n:] if self._indices else None,
+            columns=self._columns[-n:] if self._columns else None,
         )
 
     def save(self, save_path: Path | str, overwrite: bool = False):
@@ -219,13 +223,13 @@ class SparseDataFrame:
 
         self.HIDDEN_PATH.mkdir(parents=True, exist_ok=True)
         logging.info("Saving the data")
-        save_npz((self.HIDDEN_PATH / "data.npz"), self.__data)
+        save_npz((self.HIDDEN_PATH / "data.npz"), self._data)
 
         logging.info("Saving the columns and indices")
         with open((self.HIDDEN_PATH / "columns.names"), "wb") as f:
-            dump(self.__columns, f)
+            dump(self._columns, f)
         with open((self.HIDDEN_PATH / "indices.names"), "wb") as f:
-            dump(self.__indices, f)
+            dump(self._indices, f)
 
         logging.info(f"Compressing to a tar file {tar_name}")
         create_tarfile(output_name=tar_name, source_dir=self.HIDDEN_PATH)
@@ -242,11 +246,11 @@ class SparseDataFrame:
         tar.extractall(".")
 
         logging.info("Loading the data")
-        self.__data = load_npz(self.HIDDEN_PATH / "data.npz")
+        self._data = load_npz(self.HIDDEN_PATH / "data.npz")
         logging.info("Loading the columns and indices")
         with open((self.HIDDEN_PATH / "columns.names"), "rb") as f:
-            self.__columns = load(f)
+            self._columns = load(f)
         with open((self.HIDDEN_PATH / "indices.names"), "rb") as f:
-            self.__indices = load(f)
+            self._indices = load(f)
         rmdir(self.HIDDEN_PATH)
         logging.info("Load complete")
