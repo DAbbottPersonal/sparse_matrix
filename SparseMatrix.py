@@ -8,6 +8,7 @@ from numpy.typing import ArrayLike
 from pandas import DataFrame
 from scipy.sparse import csr_matrix, hstack, vstack
 
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
@@ -176,3 +177,50 @@ class SparseDataFrame:
             columns=self.columns,
             indices=(self.indices + right_indices),
         )
+
+    def save(self, save_path: Path | str, overwrite: bool = False):
+        """Save sparse matrix to a tar file"""
+
+        save_path = Path(save_path)
+        tar_name = (
+            save_path.parent / f"{save_path.name}.tar"
+            if save_path.suffix != "tar"
+            else save_path
+        )
+        assert (
+            overwrite == True or not tar_name.exists()
+        ), f"File {tar_name} already exists! Set overwrite to True to overwrite."
+
+        self.HIDDEN_PATH.mkdir(parents=True, exist_ok=True)
+        logging.info("Saving the data")
+        save_npz((self.HIDDEN_PATH / "data.npz"), self._data)
+
+        logging.info("Saving the columns and indices")
+        with open((self.HIDDEN_PATH / "columns.names"), "wb") as f:
+            dump(self._columns, f)
+        with open((self.HIDDEN_PATH / "indices.names"), "wb") as f:
+            dump(self._indices, f)
+
+        logging.info(f"Compressing to a tar file {tar_name}")
+        create_tarfile(output_name=tar_name, source_dir=self.HIDDEN_PATH)
+        rmdir(self.HIDDEN_PATH)
+        logging.info("Save complete")
+
+    def load(self, load_path: Path | str):
+        """Load sparse matrix from a tar file"""
+        load_path = Path(load_path)
+        self.HIDDEN_PATH = Path(f".temp_sparse_files_/")
+        tar = tar_open(load_path, "r:gz")
+
+        logging.info("Extracting file")
+        tar.extractall(".")
+
+        logging.info("Loading the data")
+        self._data = load_npz(self.HIDDEN_PATH / "data.npz")
+        logging.info("Loading the columns and indices")
+        with open((self.HIDDEN_PATH / "columns.names"), "rb") as f:
+            self._columns = load(f)
+        with open((self.HIDDEN_PATH / "indices.names"), "rb") as f:
+            self._indices = load(f)
+        rmdir(self.HIDDEN_PATH)
+        logging.info("Load complete")
