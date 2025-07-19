@@ -1,13 +1,12 @@
 import logging
-from pickle import dump, load
+from pathlib import Path
+from pickle import load
+from tarfile import open as tar_open
 
-from numpy import array, ndarray
-from numpy import where as np_where
+from numpy import array
 from numpy.typing import ArrayLike
 from pandas import DataFrame
-from pathlib import Path
-from scipy.sparse import csr_matrix, hstack, random, load_npz, save_npz, vstack
-from tarfile import open as tar_open
+from scipy.sparse import csr_matrix, hstack, vstack
 
 
 logging.basicConfig(
@@ -51,161 +50,132 @@ class SparseDataFrame:
         if tar_file:
             self.load(tar_file)
         else:
-            self._data = data
-            self._columns = columns
-            self._indices = indices
-            self.update_dims()
+            self.data = data
+            assert (
+                not columns or len(columns) == data.shape[1]
+            ), "Dimension of columns must match data"
+            assert (
+                not indices or len(indices) == data.shape[0]
+            ), "Dimension of indices must match data"
+            self.columns = columns
+            self.indices = indices
+            self.__update()
         self.HIDDEN_PATH = Path(f".temp_sparse_files_/")
 
-    def update_dims(self):
-        self.n_cols = self._data.shape[1]
-        if self._columns:
-            ncols = len(self._columns)
-            assert (
-                len(set(self._columns)) == ncols
-            ), "Error, columns names must be unique!"
-            assert (
-                self.n_cols == ncols
-            ), "Error, number of columns must match first dimensionality of the data!"
+    def __update(self) -> None:
+        self.shape = self.data.shape
 
-        self.n_inds = self._data.shape[0]
-        if self._indices:
-            nrows = len(self._indices)
-            assert (
-                len(set(self._indices)) == nrows
-            ), "Error, indices names must be unique!"
-            assert (
-                self.n_inds == nrows
-            ), "Error, number of indices must match first dimensionality of the data!"
+    def get_columns(self, columns: ArrayLike) -> csr_matrix:
+        """Return data by column names, if column names are set. Otherwise return data by numerical column position"""
+        if self.columns:
+            i_loc = [i for i, c in enumerate(self.columns) if c in columns]
+            if len(i_loc) == 0:
+                logging.warning("No positions correspond to provides columns.")
+                logging.warning(
+                    "Consider checking argument for typos or type differences."
+                )
+            return self.data[:, i_loc]
+        return self.data[:, columns]
 
-    def shape(self):
-        return self._data.shape
+    def get_indices(self, indices: ArrayLike) -> csr_matrix:
+        """Return data by index names, if index names are set. Otherwise return data by numerical index position"""
+        if self.indices:
+            i_loc = [i for i, c in enumerate(self.indices) if c in indices]
+            if len(i_loc) == 0:
+                logging.warning("No positions correspond to provided indices.")
+                logging.warning(
+                    "Consider checking argument for typos or type differences."
+                )
+            return self.data[i_loc, :]
+        return self.data[indices, :]
 
-    def nrows(self):
-        return self.n_inds
+    def pd_head(self, n_: int = 5) -> DataFrame:
+        df = DataFrame(
+            data=self.data[:n_, :].toarray(),
+            columns=self.columns,
+            index=self.indices[:n_],
+        )
+        return df
 
-    def ncols(self):
-        return self.n_cols
+    def pd_tail(self, n_: int = 5) -> DataFrame:
+        df = DataFrame(
+            data=self.data[-n_:, :].toarray(),
+            columns=self.columns,
+            index=self.indices[-n_:],
+        )
+        return df
 
-    def get_data(self, copy: bool = True):
-        if copy:
-            return self._data.copy() 
+    def head(self, n_: int = 5) -> DataFrame:
+        """Alias for pd_head"""
+        return self.pd_head(n_=n_)
+
+    def tail(self, n_: int = 5) -> DataFrame:
+        """Alias for pd_tail"""
+        return self.pd_tail(n_=n_)
+
+    def sp_head(self, n_: int = 5) -> csr_matrix:
+        return self.data[:n_, :]
+
+    def sp_tail(self, n_: int = 5) -> csr_matrix:
+        return self.data[-n_:, :]
+
+    def drop_columns(self, columns: ArrayLike, inplace: bool = False) -> None:
+        keep_columns = [x for x in self.columns if x not in columns]
+        if inplace:
+            self.data = self.get_columns(columns=keep_columns)
+            self.columns = keep_columns
+            self.__update()
+            return None
         else:
-            logging.info("Warning, copy set to False. Changes to data can be permanent.")
-            return self._data
+            return SparseDataFrame(
+                data=self.get_columns(columns=keep_columns),
+                columns=keep_columns,
+                indices=self.indices,
+            )
 
-    def indices(self):
-        return self._indices
+    def drop_indices(self, indices: ArrayLike, inplace: bool = False) -> None:
+        keep_indices = [x for x in self.indices if x not in indices]
+        if inplace:
+            self.data = self.get_indices(indices=keep_indices)
+            self.indices = keep_indices
+            self.__update()
+            return None
+        else:
+            return SparseDataFrame(
+                data=self.get_indices(indices=keep_indices),
+                columns=self.columns,
+                indices=keep_indices,
+            )
 
-    def columns(self):
-        return self._columns
-
-    def set_columns(self, columns: ArrayLike):
-        assert isinstance(columns, (ndarray, set, list)), "Column type not recognized!"
-        assert self.n_cols == len(
-            columns
-        ), "Error, number of columns must match zeroith dimensionality of the data!"
-        if isinstance(columns, ndarray):
-            self._columns = columns.tolist()
-        if isinstance(columns, set):
-            self._columns = list(columns)
-        if isinstance(columns, list):
-            self._columns = columns
-        self.update_dims()
-
-    def set_indices(self, indices: ArrayLike):
-        assert isinstance(indices, (ndarray, set, list)), "Column type not recognized!"
-        assert self.n_inds == len(
-            indices
-        ), "Error, number of indices must match first dimensionality of the data!"
-        if isinstance(indices, ndarray):
-            self._indices = indices.tolist()
-        if isinstance(indices, set):
-            self._indices = list(indices)
-        if isinstance(indices, list):
-            self._indices = indices
-        self.update_dims()
-
-    def __rm_icols(self, mask: list):
-        mask = [x for x in range(self.n_cols) if x not in mask]
-        self._data = self._data[mask, :]
-        self._columns = [x for i, x in enumerate(self._columns) if i in mask]
-        self.update_dims()
-
-    def __rm_irows(self, mask: list):
-        mask = [x for x in range(self.n_rows) if x not in mask]
-        self._data = self._data[:, mask]
-        self._indices = [x for i, x in enumerate(self._indices) if i in mask]
-        self.update_dims()
-
-    def rm_cols(self, columns: ArrayLike):
-        assert self._columns, "Columns not set!"
-        mask = [self._columns.index(x) for x in columns]
-        self.__rm_icols(mask)
-
-    def rm_icols(self, columns: ArrayLike):
-        assert max(columns) < self.n_cols, "Removing index OOB!"
-        self.__rm_icols(columns)
-
-    def rm_rows(self, indices: ArrayLike):
-        assert self._indices, "Indices not set!"
-        mask = [self._indices.index(x) for x in indices]
-        self.__rm_irows(mask)
-
-    def rm_irows(self, columns: ArrayLike):
-        assert max(columns) < self.n_cols, "Removing index OOB!"
-        self.__rm_irows(columns)
-
-    def append_cols(self, data: csr_matrix, column_names: list = None):
-        if column_names:
-            assert data.shape[1] == len(
-                column_names
-            ), "Data and columns are added at different lengths!"
-            assert self._columns, "Column names must exist before adding!"
-            self._columns.extend(column_names)
-        self._data = hstack([self._data, data])
-        self.update_dims()
-
-    def append_inds(self, data: csr_matrix, index_names: list = None):
-        if index_names:
-            assert data.shape[0] == len(
-                index_names
-            ), "Data and indices are added at different lengths!"
-            assert self._indices, "Index names must exist before adding!"
-            self._indices.extend(index_names)
-        self._data = vstack([self._data, data])
-        self.update_dims()
-
-    def head(self, n: int = 5):
-        """Return the n upper left corner of the matrix"""
-        return DataFrame(
-            data=self._data[:n, :n].todense(),
-            index=self._indices[:n] if self._indices else None,
-            columns=self._columns[:n] if self._columns else None,
+    # TODO: Type hinting is not working for the SparseDataFrame, debug
+    def hstack(self, right_matrix, append_suffix: str = "r"):
+        """Column-wise stacking of SparseDataFrame"""
+        assert (
+            self.indices == right_matrix.indices
+        ), "Indices of column-wise stacked objects must match"
+        right_columns = [
+            f"{x}_{append_suffix}" if x in self.columns else x
+            for x in right_matrix.columns
+        ]
+        return SparseDataFrame(
+            data=hstack([self.data, right_matrix.data]),
+            columns=(self.columns + right_columns),
+            indices=self.indices,
         )
 
-    def head_right(self, n: int = 5):
-        """Return the n upper right corner of the matrix"""
-        return DataFrame(
-            data=self._data[-n:, :n].todense(),
-            index=self._indices[:n] if self._indices else None,
-            columns=self._columns[-n:] if self._columns else None,
-        )
-
-    def tail(self, n: int = 5):
-        """Return the n bottom left corner of the matrix"""
-        return DataFrame(
-            data=self._data[:n, -n:].todense(),
-            index=self._indices[-n:] if self._indices else None,
-            columns=self._columns[:n] if self._columns else None,
-        )
-
-    def tail_right(self, n: int = 5):
-        """Return the n bottom right corner of the matrix"""
-        return DataFrame(
-            data=self._data[-n:, -n:].todense(),
-            index=self._indices[-n:] if self._indices else None,
-            columns=self._columns[-n:] if self._columns else None,
+    def vstack(self, right_matrix, append_suffix: str = "r"):
+        """Row-wise stacking of SparseDataFrame"""
+        assert (
+            self.columns == right_matrix.columns
+        ), "Indices of row-wise stacked objects must match"
+        right_indices = [
+            f"{x}_{append_suffix}" if x in self.indices else x
+            for x in right_matrix.indices
+        ]
+        return SparseDataFrame(
+            data=vstack([self.data, right_matrix.data]),
+            columns=self.columns,
+            indices=(self.indices + right_indices),
         )
 
     def save(self, save_path: Path | str, overwrite: bool = False):
